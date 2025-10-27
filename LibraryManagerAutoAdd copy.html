@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Library Manager (Auto Barcode Add)</title>
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <style>
+    body{font-family:sans-serif;background:linear-gradient(135deg,#74ABE2,#5563DE);margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;color:#222}
+    .app{width:100%;max-width:950px;background:#fff;border-radius:20px;box-shadow:0 10px 40px rgba(0,0,0,.1);padding:30px;}
+    header{display:flex;justify-content:space-between;align-items:center;margin-bottom:25px}
+    header h1{font-size:24px;margin:0}
+    .controls{display:flex;gap:10px;flex-wrap:wrap}
+    button,input[type=text]{font-family:inherit;font-size:14px;border-radius:10px;transition:0.2s}
+    button{padding:10px 16px;border:none;cursor:pointer;font-weight:500}
+    .btn-primary{background:#5563DE;color:#fff}
+    .btn-primary:hover{background:#3343c2}
+    .btn-secondary{background:#f0f3f8;color:#333}
+    .btn-secondary:hover{background:#e4e8ef}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:30px}
+    @media(max-width:880px){.grid{grid-template-columns:1fr;}}
+    form label{display:block;font-size:13px;color:#555;margin-top:10px;margin-bottom:4px}
+    form input[type=text]{width:100%;padding:10px 12px;border:1px solid #ddd}
+    form input[type=text]:focus{border-color:#5563DE;outline:none}
+    .actions{margin-top:14px;display:flex;gap:8px}
+    .list{max-height:480px;overflow:auto;background:#f9fafc;border-radius:10px;padding:10px;border:1px solid #e5e8ee}
+    .book{background:#fff;margin-bottom:10px;border-radius:8px;padding:14px;box-shadow:0 2px 6px rgba(0,0,0,0.04);display:flex;justify-content:space-between;align-items:start}
+    .muted{font-size:13px;color:#888}
+    #reader{display:none;margin-top:15px}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div>
+        <h1>📚 Library Manager</h1>
+        <p class="muted">Scan barcodes to auto-add books!</p>
+      </div>
+      <div class="controls">
+        <button class="btn-secondary" id="exportBtn">Export</button>
+        <label class="btn-secondary" for="importFile" style="padding:10px 16px;cursor:pointer">Import</label>
+        <input id="importFile" type="file" accept="application/json" style="display:none" />
+        <button class="btn-secondary" id="clearBtn">Clear</button>
+      </div>
+    </header>
+
+    <div class="grid">
+      <div>
+        <form id="addForm">
+          <label>Title</label>
+          <input type="text" id="title" required>
+          <label>Author</label>
+          <input type="text" id="author" required>
+          <label>Location (e.g., Shelf A3)</label>
+          <input type="text" id="location" required>
+          <div class="actions">
+            <button type="submit" class="btn-primary">Add Book</button>
+            <button type="button" class="btn-secondary" id="scanBtn">Scan Barcode</button>
+          </div>
+        </form>
+
+        <div id="reader"></div>
+        <button id="stopScan" class="btn-secondary" style="margin-top:10px;display:none;">Close Scanner</button>
+
+        <div class="search-bar" style="margin-top:20px;display:flex;gap:10px">
+          <input id="q" type="text" placeholder="Search by title or author" style="flex:1;padding:10px;border:1px solid #ddd">
+          <button id="searchBtn" class="btn-secondary">Search</button>
+          <button id="clearSearch" class="btn-secondary">Clear</button>
+        </div>
+      </div>
+
+      <div>
+        <div class="list" id="list"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  const STORAGE_KEY='library_books_v3';
+  let books=JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');
+  const addForm=document.getElementById('addForm');
+  const titleInp=document.getElementById('title');
+  const authorInp=document.getElementById('author');
+  const locationInp=document.getElementById('location');
+  const list=document.getElementById('list');
+  const q=document.getElementById('q');
+  const searchBtn=document.getElementById('searchBtn');
+  const clearSearch=document.getElementById('clearSearch');
+  const exportBtn=document.getElementById('exportBtn');
+  const importFile=document.getElementById('importFile');
+  const clearBtn=document.getElementById('clearBtn');
+  const scanBtn=document.getElementById('scanBtn');
+  const stopScan=document.getElementById('stopScan');
+  const reader=document.getElementById('reader');
+  let scanner;
+
+  function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(books));}
+  function render(listToRender){
+    list.innerHTML='';
+    if(!listToRender||listToRender.length===0){list.innerHTML='<div class="muted">No books found.</div>';return;}
+    listToRender.forEach((b,idx)=>{
+      const el=document.createElement('div');
+      el.className='book';
+      el.innerHTML=`<div><strong>${b.title}</strong><div class='meta'>${b.author}</div><div class='muted'>📍 ${b.location}</div></div><div><button data-del='${idx}' class='btn-secondary'>Delete</button></div>`;
+      list.appendChild(el);
+    });
+  }
+
+  addForm.addEventListener('submit',e=>{
+    e.preventDefault();
+    const book={title:titleInp.value.trim(),author:authorInp.value.trim(),location:locationInp.value.trim()};
+    if(!book.title||!book.author||!book.location)return alert('Please fill all fields');
+    books.push(book);save();render(books.slice().reverse());addForm.reset();
+  });
+
+  list.addEventListener('click',e=>{
+    const del=e.target.getAttribute('data-del');
+    if(del!==null){if(confirm('Delete this book?')){books.splice(Number(del),1);save();render(books.slice().reverse());}}
+  });
+
+  searchBtn.addEventListener('click',()=>{
+    const term=q.value.trim().toLowerCase();
+    if(!term)return render(books.slice().reverse());
+    render(books.filter(b=>b.title.toLowerCase().includes(term)||b.author.toLowerCase().includes(term)).slice().reverse());
+  });
+  clearSearch.addEventListener('click',()=>{q.value='';render(books.slice().reverse());});
+
+  exportBtn.addEventListener('click',()=>{
+    const blob=new Blob([JSON.stringify(books,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download='library_export.json';a.click();URL.revokeObjectURL(url);
+  });
+  importFile.addEventListener('change',e=>{
+    const file=e.target.files[0];if(!file)return;const readerF=new FileReader();
+    readerF.onload=function(){try{const imported=JSON.parse(readerF.result);if(!Array.isArray(imported))throw new Error('Invalid format');imported.forEach(it=>{if(it&&it.title&&it.author&&it.location)books.push(it);});save();render(books.slice().reverse());}catch(err){alert('Import failed: '+err.message);}};readerF.readAsText(file);
+  });
+  clearBtn.addEventListener('click',()=>{if(confirm('Clear all books?')){books=[];save();render([]);}});
+
+  // --- Barcode Scanner ---
+  scanBtn.addEventListener('click',()=>{
+    reader.style.display='block';
+    stopScan.style.display='inline-block';
+    if(scanner) scanner.clear();
+    scanner = new Html5Qrcode("reader");
+    scanner.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: 250 },
+      async (decodedText)=>{
+        scanner.stop();
+        reader.style.display='none';
+        stopScan.style.display='none';
+        const code=decodedText;
+        let title = code, author = "Unknown";
+        try{
+          const res=await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${code}&jscmd=data&format=json`);
+          const data=await res.json();
+          const info=data[`ISBN:${code}`];
+          if(info){
+            title = info.title || code;
+            author = info.authors?.map(a=>a.name).join(', ') || "Unknown";
+          }
+        }catch(e){ /* Offline fallback */ }
+        const book={title,author,location:"Not specified"};
+        books.push(book);
+        save();render(books.slice().reverse());
+        alert(`✅ Added book:\n${title} by ${author}`);
+      }
+    ).catch(err=>alert("Camera error: "+err));
+  });
+
+  stopScan.addEventListener('click',()=>{
+    if(scanner){scanner.stop();}
+    reader.style.display='none';
+    stopScan.style.display='none';
+  });
+
+  render(books.slice().reverse());
+})();
+</script>
+</body>
+</html>
